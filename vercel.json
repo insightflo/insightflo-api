@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "name": "insightflo-api",
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "functions": {
+    "pages/api/news/personalized.ts": {
+      "runtime": "edge",
+      "memory": 1024,
+      "maxDuration": 10,
+      "regions": ["icn1", "nrt1", "sin1", "hnd1", "sfo1"],
+      "supportsResponseStreaming": true
+    },
+    "pages/api/push/trigger.ts": {
+      "runtime": "edge",
+      "memory": 512,
+      "maxDuration": 10,
+      "regions": ["icn1", "nrt1", "sin1", "hnd1", "sfo1"]
+    },
+    "pages/api/analytics/dashboard.ts": {
+      "runtime": "edge",
+      "memory": 512,
+      "maxDuration": 10,
+      "regions": ["icn1", "nrt1", "sin1", "hnd1", "sfo1"]
+    },
+    "pages/api/analytics/alerts.ts": {
+      "runtime": "edge",
+      "memory": 256,
+      "maxDuration": 5,
+      "regions": ["icn1", "nrt1", "sin1", "hnd1", "sfo1"]
+    },
+    "pages/api/analytics/cache-optimization.ts": {
+      "runtime": "edge",
+      "memory": 512,
+      "maxDuration": 10,
+      "regions": ["icn1", "nrt1", "sin1", "hnd1", "sfo1"]
+    },
+    "pages/api/analytics/user-patterns.ts": {
+      "runtime": "edge",
+      "memory": 512,
+      "maxDuration": 10,
+      "regions": ["icn1", "nrt1", "sin1", "hnd1", "sfo1"]
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ],
+  "env": {
+    "SUPABASE_URL": "@supabase-url",
+    "SUPABASE_ANON_KEY": "@supabase-anon-key",
+    "SUPABASE_SERVICE_ROLE_KEY": "@supabase-service-role-key",
+    "FIREBASE_PROJECT_ID": "@firebase-project-id",
+    "FIREBASE_PRIVATE_KEY": "@firebase-private-key",
+    "FIREBASE_CLIENT_EMAIL": "@firebase-client-email",
+    "FCM_SERVER_KEY": "@fcm-server-key",
+    "N8N_WEBHOOK_TOKEN": "@n8n-webhook-token"
+  },
+  "ignoreCommand": "npx vercel-ignore",
+  "installCommand": "npm install",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "excludePaths": [
+    "insightflo_app/**",
+    "android/**",
+    "ios/**",
+    "linux/**",
+    "macos/**",
+    "windows/**",
+    "web/**",
+    "test/**",
+    "pubspec.yaml",
+    "pubspec.lock",
+    "analysis_options.yaml",
+    "*.iml"
+  ]
+}

@@ -1,0 +1,35 @@
+# Flutter app directory - exclude from Vercel deployment
+insightflo_app/
+android/
+ios/
+linux/
+macos/
+windows/
+web/
+test/
+
+# Flutter files
+pubspec.yaml
+pubspec.lock
+analysis_options.yaml
+*.iml
+
+# Other files to ignore
+*.md
+!README.md
+.env
+.claude/
+.gemini/
+.taskmaster/
+.windsurf/
+
+# Keep only API-related files for deployment
+# The following will be included:
+# - pages/
+# - lib/
+# - utils/
+# - types/
+# - package.json
+# - next.config.js
+# - vercel.json
+# - .env.local

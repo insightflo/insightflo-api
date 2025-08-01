@@ -1,0 +1,211 @@
+{
+  "name": "InsightFlo Push Notification Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "insightflo-push-trigger",
+        "options": {
+          "allowedOrigins": "https://insightflo-api.vercel.app"
+        }
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "insightflo-push-trigger"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process incoming webhook data and validate\nconst webhookBody = $input.first().json.body;\n\n// Validate required fields\nif (!webhookBody.user_id || !webhookBody.event_type) {\n  throw new Error('Missing required fields: user_id and event_type');\n}\n\n// Map event types to notification types\nconst eventTypeMapping = {\n  'breaking_news': 'news_alert',\n  'stock_alert': 'portfolio_update', \n  'market_volatility': 'market_alert',\n  'daily_summary': 'general'\n};\n\nconst notificationType = eventTypeMapping[webhookBody.event_type] || 'general';\n\n// Build notification payload based on event type\nlet notification = {\n  title: '',\n  body: '',\n  type: notificationType,\n  priority: 'normal',\n  data: webhookBody.data || {}\n};\n\nswitch(webhookBody.event_type) {\n  case 'breaking_news':\n    notification.title = `🚨 Breaking: ${webhookBody.title || 'Market News'}`;\n    notification.body = webhookBody.summary || 'Important market development detected';\n    notification.priority = 'high';\n    notification.image_url = webhookBody.image_url;\n    notification.action_url = `insightflo://article/${webhookBody.article_id}`;\n    break;\n    \n  case 'stock_alert':\n    const symbol = webhookBody.symbol || 'Unknown';\n    const change = webhookBody.price_change || 0;\n    const direction = change > 0 ? '📈' : '📉';\n    notification.title = `${direction} ${symbol} Alert`;\n    notification.body = `${symbol} ${change > 0 ? 'gained' : 'dropped'} ${Math.abs(change)}%`;\n    notification.priority = Math.abs(change) > 5 ? 'high' : 'normal';\n    notification.action_url = `insightflo://portfolio/${symbol}`;\n    break;\n    \n  case 'market_volatility':\n    notification.title = '⚠️ Market Volatility Alert';\n    notification.body = webhookBody.message || 'Significant market movement detected';\n    notification.priority = 'high';\n    notification.action_url = 'insightflo://markets';\n    break;\n    \n  case 'daily_summary':\n    notification.title = '📊 Your Daily Market Summary';\n    notification.body = `Portfolio: ${webhookBody.portfolio_change || 'No change'} | ${webhookBody.news_count || 0} new articles`;\n    notification.priority = 'normal';\n    notification.action_url = 'insightflo://dashboard';\n    break;\n    \n  default:\n    notification.title = webhookBody.title || 'InsightFlo Notification';\n    notification.body = webhookBody.message || 'You have a new update';\n}\n\n// Build final payload for Vercel API\nconst pushPayload = {\n  user_id: webhookBody.user_id,\n  notification: notification,\n  target: {\n    device_type: webhookBody.device_type || 'all',\n    device_ids: webhookBody.device_ids || undefined\n  },\n  scheduling: {\n    send_immediately: true\n  }\n};\n\nreturn {\n  json: {\n    payload: pushPayload,\n    workflow_id: $workflow.id,\n    execution_id: $execution.id,\n    processed_at: new Date().toISOString(),\n    original_event: webhookBody\n  }\n};"
+      },
+      "name": "Process Notification Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://insightflo-api.vercel.app/api/push/trigger",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "httpMethod": "POST",
+        "jsonParameters": true,
+        "parametersJson": "={{ $json.payload }}",
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 3
+          }
+        }
+      },
+      "name": "Send Push Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "insightflo-api-auth",
+          "name": "InsightFlo API Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.success }}",
+              "operation": "equal",
+              "value2": "true"
+            }
+          ]
+        }
+      },
+      "name": "Check Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log successful notification delivery\nconst result = $input.first().json;\n\nconsole.log('✅ Push notification sent successfully:', {\n  user_id: result.userId,\n  notification_type: result.notificationType,\n  devices_targeted: result.delivery.totalDevices,\n  successful_deliveries: result.delivery.successful,\n  failed_deliveries: result.delivery.failed,\n  processing_time: result.processingTime + 'ms'\n});\n\n// Optional: Send success webhook to analytics service\n// or update user engagement metrics\n\nreturn {\n  json: {\n    status: 'success',\n    user_id: result.userId,\n    delivery_stats: result.delivery,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "name": "Log Success",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log failed notification delivery\nconst result = $input.first().json;\n\nconsole.error('❌ Push notification failed:', {\n  error: result.error || 'Unknown error',\n  user_id: result.userId || 'Unknown',\n  timestamp: new Date().toISOString()\n});\n\n// Optional: Send failure alert to monitoring service\n// or trigger retry mechanism\n\nreturn {\n  json: {\n    status: 'failed',\n    error: result.error || 'Unknown error',\n    user_id: result.userId || 'Unknown',\n    timestamp: new Date().toISOString(),\n    requires_retry: true\n  }\n};"
+      },
+      "name": "Log Failure",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO notification_analytics (\\n  workflow_id,\\n  execution_id,\\n  user_id,\\n  notification_type,\\n  success,\\n  devices_targeted,\\n  successful_deliveries,\\n  processing_time_ms,\\n  created_at\\n) VALUES (\\n  '{{ $node[\"Process Notification Data\"].json.workflow_id }}',\\n  '{{ $node[\"Process Notification Data\"].json.execution_id }}',\\n  '{{ $json.user_id }}',\\n  '{{ $node[\"Send Push Notification\"].json.notificationType }}',\\n  {{ $json.status === 'success' ? 'true' : 'false' }},\\n  {{ $node[\"Send Push Notification\"].json.delivery.totalDevices || 0 }},\\n  {{ $node[\"Send Push Notification\"].json.delivery.successful || 0 }},\\n  {{ $node[\"Send Push Notification\"].json.processingTime || 0 }},\\n  NOW()\\n)",
+        "options": {}
+      },
+      "name": "Store Analytics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1340, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-analytics",
+          "name": "Supabase Analytics DB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Process Notification Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Notification Data": {
+      "main": [
+        [
+          {
+            "node": "Send Push Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Push Notification": {
+      "main": [
+        [
+          {
+            "node": "Check Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Success": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Success": {
+      "main": [
+        [
+          {
+            "node": "Store Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failure": {
+      "main": [
+        [
+          {
+            "node": "Store Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "timezone": "Asia/Seoul",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "insightflo-push-notifications",
+  "tags": [
+    {
+      "id": "insightflo",
+      "name": "InsightFlo"
+    },
+    {
+      "id": "push-notifications",
+      "name": "Push Notifications"
+    },
+    {
+      "id": "firebase",
+      "name": "Firebase"
+    }
+  ],
+  "pinData": {},
+  "triggerCount": 1,
+  "updatedAt": "2024-01-20T12:00:00.000Z",
+  "createdAt": "2024-01-20T12:00:00.000Z"
+}
