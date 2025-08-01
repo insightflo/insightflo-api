@@ -5,27 +5,39 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export interface UserInterest {
   id: string;
   user_id: string;
-  keyword: string;
-  weight: number;
-  category?: string;
+  interest_category: string;
+  interest_keywords?: string[];
+  priority_level?: number;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface UserPortfolio {
   id: string;
   user_id: string;
-  symbol: string;
-  weight: number;
-  sector?: string;
+  stock_code: string;
+  stock_name: string;
+  weight?: number;
+  purchase_price?: number;
+  quantity?: number;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface UserNewsHistory {
   id: string;
   user_id: string;
-  article_id: string;
-  action: 'view' | 'bookmark' | 'share';
+  news_article_id: string;
+  relevance_score?: number;
+  interest_match_keywords?: string[];
+  is_read?: boolean;
+  is_bookmarked?: boolean;
+  is_liked?: boolean;
+  read_at?: string;
+  recommendation_reason?: string;
+  interaction_metadata?: any;
   created_at: string;
+  updated_at?: string;
 }
 
 // Supabase 실제 스키마에 맞춘 인터페이스
@@ -111,7 +123,7 @@ export async function fetchUserInterests(
     .from('user_interests')
     .select('*')
     .eq('user_id', userId)
-    .order('weight', { ascending: false });
+    .order('priority_level', { ascending: false });
 
   if (error) {
     console.warn('Failed to fetch user interests:', error.message);
