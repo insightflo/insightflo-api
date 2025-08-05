@@ -9,6 +9,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+// Import JWT for custom token verification
+import jwt from 'jsonwebtoken';
+
 // Create Supabase client for server-side usage
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -60,6 +63,47 @@ export const verifySupabaseToken = async (token: string) => {
     return user;
   } catch (error) {
     throw new Error('Token verification failed');
+  }
+};
+
+// Verify custom JWT token (for anonymous users and API-generated tokens)
+export const verifyCustomJwtToken = async (token: string) => {
+  try {
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET not configured');
+    }
+
+    // Verify and decode the JWT token
+    const decoded = jwt.verify(token, jwtSecret) as any;
+    
+    // Validate token structure
+    if (!decoded.userId) {
+      throw new Error('Invalid token structure: missing userId');
+    }
+
+    // Check token expiration
+    const now = Math.floor(Date.now() / 1000);
+    if (decoded.exp && decoded.exp < now) {
+      throw new Error('Token has expired');
+    }
+
+    return {
+      user: {
+        id: decoded.userId,
+        isAnonymous: decoded.isAnonymous || false,
+        iat: decoded.iat,
+        exp: decoded.exp,
+      }
+    };
+  } catch (error) {
+    if (error instanceof jwt.JsonWebTokenError) {
+      throw new Error('Invalid JWT token');
+    }
+    if (error instanceof jwt.TokenExpiredError) {
+      throw new Error('JWT token has expired');
+    }
+    throw new Error(`JWT verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
 

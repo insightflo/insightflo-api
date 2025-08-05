@@ -2,9 +2,7 @@
 // Runtime: Edge (512MB memory, 5s max duration)
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase, verifySupabaseToken } from '../../../lib/supabase';
 import { 
-  validateOptionalAuthToken, 
   withErrorHandling,
   checkRateLimit,
   getClientId,
@@ -15,7 +13,6 @@ import {
   createPerformanceHeaders,
   type PerformanceMetrics,
 } from '../../../utils/analytics';
-import { UserInterest } from '../../../utils/database';
 
 // Edge runtime configuration
 export const config = {
@@ -41,40 +38,61 @@ interface ApiResponse<T> {
   };
 }
 
-interface KeywordRequest {
-  interest_category: string;
-  interest_keywords?: string[];
-  priority_level?: number;
+// 뉴스 응답 인터페이스
+interface NewsArticle {
+  id: string;
+  title: string;
+  summary: string;
+  url: string;
+  publishedAt: string;
+  source: string;
+  keywords: string[];
+  score: number;
 }
 
-interface InterestListData {
-  interests: UserInterest[];
+interface NewsListData {
+  articles: NewsArticle[];
   total: number;
+  personalizedBy?: string[];
+  message?: string;
 }
 
 /**
- * Keywords Management API Endpoint
+ * News API Endpoint (키워드 기반 뉴스 조회)
  * 
- * GET /api/keywords - 사용자의 관심 키워드 목록 조회
- * POST /api/keywords - 새로운 키워드 추가
- * PUT /api/keywords/:id - 키워드 수정 (weight, category)
- * DELETE /api/keywords/:id - 키워드 삭제
+ * GET /api/keywords - 키워드 기반 뉴스 조회 (로컬 키워드를 파라미터로 전송)
  * 
- * Headers:
- * - Authorization: Bearer <jwt_token> (Required)
+ * Query Parameters:
+ * - keywords: 콤마로 구분된 키워드 목록 (예: "AI,스타트업,기술")
+ * - weights: 키워드별 가중치 (예: "0.8,0.6,0.9")
+ * - limit: 반환할 뉴스 개수 (기본값: 20)
+ * 
+ * Headers: 인증 불필요
  */
 
-// GET - 키워드 목록 조회
-const getInterests = async (req: NextRequest, userId: string | null): Promise<NextResponse> => {
+// GET - 키워드 기반 뉴스 조회 (인증 불필요)
+const getPersonalizedNews = async (req: NextRequest): Promise<NextResponse> => {
   const startTime = Date.now();
+  const { searchParams } = new URL(req.url);
+  
+  // URL 파라미터에서 키워드와 설정 추출
+  const keywordsParam = searchParams.get('keywords') || '';
+  const weightsParam = searchParams.get('weights') || '';
+  const limitParam = parseInt(searchParams.get('limit') || '20');
+  
+  const keywords = keywordsParam ? keywordsParam.split(',').map(k => k.trim()) : [];
+  const weights = weightsParam ? weightsParam.split(',').map(w => parseFloat(w.trim())) : [];
+  
+  console.log('Fetching personalized news for keywords:', keywords);
 
-  if (!userId) {
-    // 익명 사용자의 경우 빈 배열 반환
-    const response: ApiResponse<InterestListData> = {
+  // 키워드가 없으면 일반 뉴스 반환
+  if (keywords.length === 0) {
+    const response: ApiResponse<NewsListData> = {
       success: true,
       data: {
-        interests: [],
+        articles: [],
         total: 0,
+        message: 'No keywords provided, add some interests for personalized news'
       },
       metadata: {
         total: 0,
@@ -88,49 +106,50 @@ const getInterests = async (req: NextRequest, userId: string | null): Promise<Ne
     return NextResponse.json(response, {
       status: 200,
       headers: {
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': 'public, max-age=300',
         'Content-Type': 'application/json',
       },
     });
   }
 
-  const { data, error } = await supabase
-    .from('user_interests')
-    .select('*')
-    .eq('user_id', userId)
-    .order('priority_level', { ascending: false });
-
-  if (error) {
-    console.warn('Failed to fetch user interests:', error.message);
-    throw new Error(`Failed to fetch interests: ${error.message}`);
-  }
+  // TODO: 실제 뉴스 데이터베이스에서 키워드 기반 검색
+  // 현재는 더미 데이터 반환
+  const mockNews = keywords.map((keyword, index) => ({
+    id: `news_${index + 1}`,
+    title: `${keyword}에 대한 최신 뉴스`,
+    summary: `${keyword} 관련 중요한 업데이트가 있습니다.`,
+    url: `https://example.com/news/${keyword}`,
+    publishedAt: new Date().toISOString(),
+    source: 'MockNews',
+    keywords: [keyword],
+    score: weights[index] || 1.0,
+  }));
 
   const processingTime = Date.now() - startTime;
   
   // 성능 메트릭 추적
   const metrics: PerformanceMetrics = {
-    endpoint: '/api/interests',
+    endpoint: '/api/keywords',
     method: 'GET',
     statusCode: 200,
     processingTime,
     cacheStatus: 'MISS',
-    userId,
+    userId: null, // 인증 없음
     timestamp: Date.now(),
-    articlesCount: 0,
-    sortMode: 'priority',
+    articlesCount: mockNews.length,
+    sortMode: 'personalized',
   };
   trackPerformanceMetrics(metrics);
 
-  const responseData: InterestListData = {
-    interests: data || [],
-    total: (data || []).length,
-  };
-
-  const response: ApiResponse<InterestListData> = {
+  const response: ApiResponse<NewsListData> = {
     success: true,
-    data: responseData,
+    data: {
+      articles: mockNews,
+      total: mockNews.length,
+      personalizedBy: keywords,
+    },
     metadata: {
-      total: responseData.total,
+      total: mockNews.length,
       performance: {
         processingTime,
         cacheStatus: 'MISS'
@@ -141,263 +160,21 @@ const getInterests = async (req: NextRequest, userId: string | null): Promise<Ne
   return NextResponse.json(response, {
     status: 200,
     headers: {
-      'Cache-Control': 'private, max-age=300', // 5분 캐시
+      'Cache-Control': 'public, max-age=300', // 5분 캐시
       'Content-Type': 'application/json',
       ...createPerformanceHeaders(metrics),
     },
   });
 };
 
-// POST - 새로운 키워드 추가
-const addInterest = async (req: NextRequest, userId: string | null): Promise<NextResponse> => {
-  const startTime = Date.now();
+// POST, PUT, DELETE 메서드는 더 이상 지원하지 않음
+// 키워드 관리는 로컬에서만 수행
 
-  if (!userId) {
-    throw new Error('Authentication required for interest management');
-  }
-
-  const body: KeywordRequest = await req.json();
-
-  if (!body.interest_category || body.interest_category.trim().length === 0) {
-    throw new Error('Interest category is required');
-  }
-
-  if (body.interest_category.length > 100) {
-    throw new Error('Interest category must be less than 100 characters');
-  }
-
-  if (body.priority_level && (body.priority_level < 1 || body.priority_level > 5)) {
-    throw new Error('Priority level must be between 1 and 5');
-  }
-
-
-  // 중복 카테고리 확인
-  const { data: existing } = await supabase
-    .from('user_interests')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('interest_category', body.interest_category.trim());
-
-  if (existing && existing.length > 0) {
-    throw new Error('Interest category already exists');
-  }
-
-  // 관심사 추가
-  const { data, error } = await supabase
-    .from('user_interests')
-    .insert({
-      user_id: userId,
-      interest_category: body.interest_category.trim(),
-      interest_keywords: body.interest_keywords || [],
-      priority_level: body.priority_level || 1,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to add interest: ${error.message}`);
-  }
-
-  const processingTime = Date.now() - startTime;
-  
-  // 성능 메트릭 추적
-  const metrics: PerformanceMetrics = {
-    endpoint: '/api/interests',
-    method: 'POST',
-    statusCode: 201,
-    processingTime,
-    cacheStatus: 'MISS',
-    userId,
-    timestamp: Date.now(),
-    articlesCount: 0,
-    sortMode: 'priority',
-  };
-  trackPerformanceMetrics(metrics);
-
-  const response: ApiResponse<UserInterest> = {
-    success: true,
-    data,
-    metadata: {
-      performance: {
-        processingTime,
-        cacheStatus: 'MISS'
-      }
-    }
-  };
-
-  return NextResponse.json(response, {
-    status: 201,
-    headers: {
-      'Content-Type': 'application/json',
-      ...createPerformanceHeaders(metrics),
-    },
-  });
-};
-
-// PUT - 관심사 수정
-const updateInterest = async (req: NextRequest, userId: string | null): Promise<NextResponse> => {
-  const startTime = Date.now();
-
-  if (!userId) {
-    throw new Error('Authentication required for interest management');
-  }
-
-  const { searchParams } = new URL(req.url);
-  const interestId = searchParams.get('id');
-
-  if (!interestId) {
-    throw new Error('Interest ID is required');
-  }
-
-  const body: Partial<KeywordRequest> = await req.json();
-
-  // 소유권 확인
-  const { data: existing } = await supabase
-    .from('user_interests')
-    .select('id')
-    .eq('id', interestId)
-    .eq('user_id', userId)
-    .single();
-
-  if (!existing) {
-    throw new Error('Interest not found or access denied');
-  }
-
-  // 업데이트할 필드 구성
-  const updateData: any = {};
-  if (body.interest_category) {
-    if (body.interest_category.length > 100) {
-      throw new Error('Interest category must be less than 100 characters');
-    }
-    updateData.interest_category = body.interest_category.trim();
-  }
-  if (body.priority_level !== undefined) {
-    updateData.priority_level = Math.max(1, Math.min(5, body.priority_level)); // 1-5 범위
-  }
-  if (body.interest_keywords !== undefined) {
-    updateData.interest_keywords = body.interest_keywords;
-  }
-
-  if (Object.keys(updateData).length === 0) {
-    throw new Error('No valid fields to update');
-  }
-
-  const { data, error } = await supabase
-    .from('user_interests')
-    .update(updateData)
-    .eq('id', interestId)
-    .eq('user_id', userId)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to update interest: ${error.message}`);
-  }
-
-  const processingTime = Date.now() - startTime;
-  
-  // 성능 메트릭 추적
-  const metrics: PerformanceMetrics = {
-    endpoint: '/api/interests',
-    method: 'PUT',
-    statusCode: 200,
-    processingTime,
-    cacheStatus: 'MISS',
-    userId,
-    timestamp: Date.now(),
-    articlesCount: 0,
-    sortMode: 'priority',
-  };
-  trackPerformanceMetrics(metrics);
-
-  const response: ApiResponse<UserInterest> = {
-    success: true,
-    data,
-    metadata: {
-      performance: {
-        processingTime,
-        cacheStatus: 'MISS'
-      }
-    }
-  };
-
-  return NextResponse.json(response, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      ...createPerformanceHeaders(metrics),
-    },
-  });
-};
-
-// DELETE - 관심사 삭제
-const deleteInterest = async (req: NextRequest, userId: string | null): Promise<NextResponse> => {
-  const startTime = Date.now();
-
-  if (!userId) {
-    throw new Error('Authentication required for interest management');
-  }
-
-  const { searchParams } = new URL(req.url);
-  const interestId = searchParams.get('id');
-
-  if (!interestId) {
-    throw new Error('Interest ID is required');
-  }
-
-
-  // 소유권 확인 후 삭제
-  const { error } = await supabase
-    .from('user_interests')
-    .delete()
-    .eq('id', interestId)
-    .eq('user_id', userId);
-
-  if (error) {
-    throw new Error(`Failed to delete interest: ${error.message}`);
-  }
-
-  const processingTime = Date.now() - startTime;
-  
-  // 성능 메트릭 추적
-  const metrics: PerformanceMetrics = {
-    endpoint: '/api/interests',
-    method: 'DELETE',
-    statusCode: 200,
-    processingTime,
-    cacheStatus: 'MISS',
-    userId,
-    timestamp: Date.now(),
-    articlesCount: 0,
-    sortMode: 'priority',
-  };
-  trackPerformanceMetrics(metrics);
-
-  const response: ApiResponse<{ success: boolean }> = {
-    success: true,
-    data: { success: true },
-    metadata: {
-      performance: {
-        processingTime,
-        cacheStatus: 'MISS'
-      }
-    }
-  };
-
-  return NextResponse.json(response, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      ...createPerformanceHeaders(metrics),
-    },
-  });
-};
-
-// Common authentication and rate limiting logic
-const authenticateAndGetUser = async (req: NextRequest) => {
-  // Apply rate limiting (50 requests per minute per client)
+// Named exports for Next.js API Routes - 인증 없는 뉴스 조회만 지원
+export const GET = withErrorHandling(async (req: NextRequest): Promise<NextResponse> => {
+  // 레이트 리미팅만 적용 (인증 불필요)
   const clientId = getClientId(req);
-  const rateLimit = checkRateLimit(clientId, 50, 60000);
+  const rateLimit = checkRateLimit(clientId, 100, 60000); // 더 관대한 제한
   
   if (!rateLimit.allowed) {
     const resetDate = new Date(rateLimit.resetTime).toISOString();
@@ -406,42 +183,5 @@ const authenticateAndGetUser = async (req: NextRequest) => {
     );
   }
 
-  // Extract and validate Authorization token (optional)
-  const authHeader = req.headers.get('authorization');
-  let token: string | null = null;
-  let userId: string | null = null;
-
-  try {
-    token = validateOptionalAuthToken(authHeader);
-    if (token) {
-      const user = await verifySupabaseToken(token);
-      userId = user.user?.id || null;
-    }
-  } catch (authError: any) {
-    // 인증 에러는 무시하고 익명 사용자로 처리
-    console.warn('Authentication failed, treating as anonymous:', authError.message);
-  }
-
-  return userId;
-};
-
-// Named exports for Next.js API Routes
-export const GET = withErrorHandling(async (req: NextRequest): Promise<NextResponse> => {
-  const userId = await authenticateAndGetUser(req);
-  return getInterests(req, userId);
-});
-
-export const POST = withErrorHandling(async (req: NextRequest): Promise<NextResponse> => {
-  const userId = await authenticateAndGetUser(req);
-  return addInterest(req, userId);
-});
-
-export const PUT = withErrorHandling(async (req: NextRequest): Promise<NextResponse> => {
-  const userId = await authenticateAndGetUser(req);
-  return updateInterest(req, userId);
-});
-
-export const DELETE = withErrorHandling(async (req: NextRequest): Promise<NextResponse> => {
-  const userId = await authenticateAndGetUser(req);
-  return deleteInterest(req, userId);
+  return getPersonalizedNews(req);
 });

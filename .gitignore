@@ -65,6 +65,11 @@ dist/
 *.key
 *.pem
 
+# MCP API Keys (SECURITY: Never commit API keys)
+.mcp.keys.json
+.mcp.keys.local.json
+*.keys.json
+
 # Cache directories
 .cache/
 .tmp/
